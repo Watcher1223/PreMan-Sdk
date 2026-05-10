@@ -5,6 +5,7 @@ export type HeaderLike = Headers | Record<string, string | string[] | undefined>
 
 export type RequireScopeOptions = {
   client: PremanClient;
+  mcpId: string;
   requiredScope: string;
 };
 
@@ -24,6 +25,7 @@ export async function verifyBearerToken(
 
   const result = await options.client.verifyToken({
     token,
+    mcpId: options.mcpId,
     requiredScope: options.requiredScope,
   });
 

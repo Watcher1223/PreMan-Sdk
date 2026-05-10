@@ -1,7 +1,7 @@
 {
-  "name": "@preman/sdk",
-  "version": "0.1.0",
-  "description": "SDK and CLI for turning APIs into secure MCP servers with scoped tokens and audit logs.",
+  "name": "preman-sdk",
+  "version": "0.1.1",
+  "description": "SDK and CLI for turning APIs into hosted MCP servers with scoped consumer tokens.",
   "type": "module",
   "license": "MIT",
   "homepage": "https://preman.live",
@@ -18,17 +18,25 @@
       "import": "./dist/index.js"
     }
   },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "bin": {
-    "preman": "./dist/cli.js"
+    "preman": "dist/cli.js",
+    "preman-sdk": "dist/cli.js"
   },
   "files": [
     "dist",
+    "examples",
     "README.md",
     "LICENSE"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && node --test test/*.test.mjs",
     "prepublishOnly": "npm run build"
   },
   "keywords": [

@@ -1,49 +1,37 @@
 # PreMan SDK
 
-[![Star on GitHub](https://img.shields.io/badge/GitHub-Star%20the%20SDK-black?logo=github)](https://github.com/Watcher1223/PreMan-Sdk)
+[![GitHub stars](https://img.shields.io/github/stars/Watcher1223/PreMan-Sdk?style=social)](https://github.com/Watcher1223/PreMan-Sdk)
 [![Website](https://img.shields.io/badge/PreMan-preman.live-black)](https://preman.live)
-[![Hosted workspace](https://img.shields.io/badge/OpenTest-workspace-10b981)](https://www.flowtest.opentest.live)
+[![Workspace](https://img.shields.io/badge/OpenTest-workspace-10b981)](https://www.flowtest.opentest.live)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-PreMan turns existing API endpoints into secure, hosted MCP tools for AI agents.
+PreMan turns REST API endpoints into hosted MCP servers that AI agents can call with scoped consumer tokens.
 
-The SDK is for teams that want to register endpoints, deploy MCP servers, issue scoped tokens, verify agent access, and write audit events from code or CI. The hosted OpenTest workspace is where your team sees the deployed MCPs, customer tokens, audit logs, and the company knowledge graph built from agent activity.
+Use this SDK when you want to register endpoints from code or CI, deploy them as hosted MCP tools, and mint scoped tokens for agents, customers, or temporary sessions. The hosted workspace at [flowtest.opentest.live](https://www.flowtest.opentest.live) is where your team sees hosted MCPs, customer tokens, audit logs, and the company knowledge graph generated from agent activity.
 
 ```text
-Your API or CI job
-  -> PreMan SDK
-  -> Hosted OpenTest workspace
-  -> MCP URL + scoped token for an agent or customer
+Your API / CI job
+  -> preman-sdk
+  -> hosted MCP URL
+  -> scoped token for an agent or customer
+  -> audit logs in the hosted workspace
 ```
-
-## When To Use It
-
-Use the SDK when you want to:
-
-- register REST endpoints from a repo, OpenAPI export, or CI job
-- deploy selected endpoints as a hosted MCP server
-- mint short-lived tokens for agents, customers, or sessions
-- enforce token scopes before an agent can call a tool
-- send custom audit events into the hosted workspace
-- automate setup without clicking through the UI
-
-Use the hosted workspace at [flowtest.opentest.live](https://www.flowtest.opentest.live) to inspect deployed MCPs, manage customer tokens, revoke access, review audit logs, and see the company knowledge graph generated from agent activity.
 
 ## Install
 
 ```bash
-npm install @preman/sdk
+npm install preman-sdk
 ```
 
-Or use the CLI from a project:
+Or run the CLI directly:
 
 ```bash
-npx preman init --api-key pm_live_your_key
+npx preman-sdk init --api-key pm_live_your_key
 ```
 
 ## Quick Start
 
-Create an endpoint file:
+Create `endpoints.json`:
 
 ```json
 [
@@ -64,13 +52,13 @@ Create an endpoint file:
 ]
 ```
 
-Register the endpoint:
+Register the endpoints into a Flow playground session:
 
 ```bash
 preman register --file endpoints.json --upstream https://api.company.com
 ```
 
-Deploy it as a hosted MCP:
+Deploy the same endpoints as a hosted MCP:
 
 ```bash
 preman deploy \
@@ -79,37 +67,22 @@ preman deploy \
   --upstream https://api.company.com
 ```
 
-Mint a scoped token for one agent session:
+Mint a scoped consumer token:
 
 ```bash
 preman token \
-  --mcp-id mcp_123 \
-  --agent-id cursor-agent \
+  --mcp-id 093c4ad4-477a-4e47-94b5-24ea8f1fe4f4 \
+  --consumer-label "Acme support agent" \
   --scopes auth:login \
-  --ttl 900
+  --rate-limit-rpm 60
 ```
 
-Then open [flowtest.opentest.live](https://www.flowtest.opentest.live) to see the MCP, token, call history, audit logs, and agent activity graph.
-
-## How Token Scoping Works
-
-PreMan tokens are intentionally narrow. A token can be tied to:
-
-- an MCP server, such as `mcp_123`
-- an agent identity, such as `cursor-agent`
-- a customer identity, such as `customer_acme`
-- one or more scopes, such as `auth:login` or `orders:write`
-- a TTL, such as `900` seconds
-- optional usage limits, such as max tool calls
-
-When an agent calls a hosted MCP tool, PreMan checks the token before forwarding the request to your upstream API. Calls outside the token's scope are denied and written to the audit log. Expired or revoked tokens stop working immediately.
-
-Your team can manage and revoke those tokens from the hosted workspace.
+Then open [flowtest.opentest.live](https://www.flowtest.opentest.live) to inspect the hosted MCP, copy the install snippet, revoke tokens, and review audit logs.
 
 ## TypeScript SDK
 
 ```ts
-import { PremanClient } from "@preman/sdk";
+import { PremanClient } from "preman-sdk";
 
 const preman = new PremanClient({
   apiKey: process.env.PREMAN_API_KEY,
@@ -117,81 +90,55 @@ const preman = new PremanClient({
   appUrl: "https://www.flowtest.opentest.live",
 });
 
-const mcp = await preman.deployMcp({
-  name: "Auth MCP",
-  upstreamBaseUrl: "https://api.company.com",
-  endpoints: [
-    {
-      method: "POST",
-      path: "/auth/login",
-      scope: "auth:login",
-      description: "Login with email and password.",
-      requestBodySchema: {
-        type: "object",
-        properties: {
-          email: { type: "string", format: "email" },
-          password: { type: "string" },
-        },
-        required: ["email", "password"],
+const endpoints = [
+  {
+    method: "POST" as const,
+    path: "/auth/login",
+    scope: "auth:login",
+    description: "Login with email and password.",
+    requestBodySchema: {
+      type: "object",
+      properties: {
+        email: { type: "string", format: "email" },
+        password: { type: "string" },
       },
+      required: ["email", "password"],
     },
-  ],
+  },
+];
+
+const session = await preman.registerEndpoints({
+  upstreamBaseUrl: "https://api.company.com",
+  intent: "Auth endpoints",
+  endpoints,
 });
 
-const token = await preman.createToken({
-  mcpId: mcp.mcpId,
-  agentId: "cursor-agent",
-  scopes: ["auth:login"],
-  ttlSeconds: 900,
+console.log(session.dashboardUrl);
+
+const mcp = await preman.deployMcp({
+  sessionId: session.sessionId,
+  name: "Auth MCP",
+  upstreamBaseUrl: "https://api.company.com",
+  endpoints,
 });
 
 console.log(mcp.hostedUrl);
-console.log(token.installSnippet.mcpJsonString);
+console.log(mcp.installSnippet?.mcpJsonString);
 ```
 
-## Verify Agent Access
+## Token Scoping
 
-If your API receives PreMan-issued tokens directly, verify them before serving the request.
+PreMan consumer tokens are scoped to a hosted MCP. The hosted MCP runtime verifies the token before forwarding a tool call to your upstream API.
 
-```ts
-import { PremanClient, verifyBearerToken } from "@preman/sdk";
+A token can include:
 
-const preman = new PremanClient({
-  apiKey: process.env.PREMAN_API_KEY,
-});
+- a hosted MCP id
+- a consumer label, such as a customer or agent session
+- one or more scopes, such as `auth:login` or `orders:write`
+- optional rate limits
+- an upstream credential binding
 
-export async function POST(request: Request) {
-  const identity = await verifyBearerToken(request.headers, {
-    client: preman,
-    requiredScope: "orders:write",
-  });
-
-  return Response.json({
-    ok: true,
-    agentId: identity.agentId,
-    customerId: identity.customerId,
-  });
-}
-```
-
-## Write Audit Events
-
-Use audit events for actions that happen outside the hosted MCP runtime but still matter to agent observability.
-
-```ts
-await preman.audit({
-  agentId: "cursor-agent",
-  customerId: "customer_acme",
-  action: "orders.exported",
-  resource: "orders",
-  outcome: "success",
-  metadata: {
-    rowCount: 42,
-  },
-});
-```
-
-Those events appear in the hosted workspace alongside MCP tool calls.
+Calls outside the token's scope are denied by the hosted runtime and appear in the hosted workspace audit trail. Tokens can be revoked from the hosted workspace.
 
 ## CLI Reference
 
@@ -200,7 +147,7 @@ preman init --api-key pm_live_...
 preman status
 preman register --file endpoints.json --upstream https://api.company.com
 preman deploy --name "Auth MCP" --file endpoints.json --upstream https://api.company.com
-preman token --mcp-id mcp_123 --agent-id cursor-agent --scopes auth:login --ttl 900
+preman token --mcp-id mcp_123 --consumer-label cursor-agent --scopes auth:login --rate-limit-rpm 60
 ```
 
 ## Configuration
@@ -219,30 +166,29 @@ PREMAN_API_URL=https://flow.opentest.live
 PREMAN_APP_URL=https://www.flowtest.opentest.live
 ```
 
-## SDK vs Hosted Workspace
+## Current API Surface
 
-The SDK should stay thin and automatable:
+Working today:
 
-- endpoint registration
-- hosted MCP deployment helpers
-- scoped token creation
-- token verification helpers
-- custom audit event logging
-- CLI commands for local setup and CI
+- `registerEndpoints()` -> creates or updates a Flow playground session
+- `deployMcp()` -> creates a hosted MCP from endpoint definitions
+- `createToken()` -> mints a scoped hosted MCP consumer token
+- `preman` CLI -> setup, register, deploy, token minting, status
 
-The hosted workspace is where teams operate the system:
+Planned next:
 
-- hosted MCP servers
-- customer and agent tokens
-- policy, revocation, and expiry
-- audit logs and tool-call traces
-- agent observability dashboards
-- company knowledge graph from agent activity
+- SDK-side token verification middleware for customer backends
+- custom audit event ingestion for non-MCP agent actions
+- OpenAPI/Postman import helpers
+- framework examples for Express, Fastify, Next.js, and Hono
+
+Hosted MCP calls are already authenticated, scoped, and audited by PreMan.
 
 ## Development
 
 ```bash
 npm install
+npm test
 npm run build
 ```
 

@@ -14,6 +14,7 @@ export type {
   DeployMcpRequest,
   DeployMcpResponse,
   EndpointDefinition,
+  HostedMcpInstallSnippet,
   HttpMethod,
   JsonSchema,
   PremanClientOptions,
@@ -22,4 +23,3 @@ export type {
   VerifyTokenRequest,
   VerifyTokenResponse,
 } from "./types.js";
-

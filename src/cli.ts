@@ -5,9 +5,14 @@ import { readConfig, writeConfig } from "./config.js";
 import type { EndpointDefinition } from "./types.js";
 
 type Command = "init" | "register" | "deploy" | "token" | "status" | "help";
+const VERSION = "0.1.1";
 
 async function main(): Promise<void> {
   const [, , rawCommand = "help", ...args] = process.argv;
+  if (rawCommand === "--version" || rawCommand === "-v" || rawCommand === "version") {
+    console.log(VERSION);
+    return;
+  }
   if (rawCommand === "help" || rawCommand === "--help" || rawCommand === "-h") {
     printHelp();
     return;
@@ -44,8 +49,10 @@ async function main(): Promise<void> {
     if (!file) throw new Error("register requires --file endpoints.json");
     const endpoints = JSON.parse(await readFile(file, "utf8")) as EndpointDefinition[];
     const result = await client.registerEndpoints(omitUndefined({
+      sessionId: valueFor(args, "--session-id"),
       projectId: valueFor(args, "--project-id"),
       upstreamBaseUrl: valueFor(args, "--upstream"),
+      intent: valueFor(args, "--intent"),
       endpoints,
     }));
     console.log(JSON.stringify(result, null, 2));
@@ -59,7 +66,15 @@ async function main(): Promise<void> {
     if (!upstreamBaseUrl) throw new Error("deploy requires --upstream https://api.example.com");
     if (!file) throw new Error("deploy requires --file endpoints.json");
     const endpoints = JSON.parse(await readFile(file, "utf8")) as EndpointDefinition[];
-    const result = await client.deployMcp({ name, upstreamBaseUrl, endpoints });
+    const result = await client.deployMcp(omitUndefined({
+      name,
+      upstreamBaseUrl,
+      sessionId: valueFor(args, "--session-id"),
+      endpoints,
+      initialUpstreamSecret: valueFor(args, "--upstream-secret"),
+      initialUpstreamSecretType: valueFor(args, "--upstream-secret-type") as "bearer" | "api_key" | "basic" | "custom" | undefined,
+      initialConsumerLabel: valueFor(args, "--consumer-label") ?? "default-consumer",
+    }));
     console.log(JSON.stringify(result, null, 2));
     return;
   }
@@ -75,8 +90,11 @@ async function main(): Promise<void> {
       agentId: valueFor(args, "--agent-id"),
       customerId: valueFor(args, "--customer-id"),
       label: valueFor(args, "--label"),
+      consumerLabel: valueFor(args, "--consumer-label"),
       ttlSeconds: numberFor(args, "--ttl"),
       maxToolCalls: numberFor(args, "--max-calls"),
+      rateLimitRpm: numberFor(args, "--rate-limit-rpm"),
+      upstreamCredentialId: valueFor(args, "--upstream-credential-id"),
     }));
     console.log(JSON.stringify(result, null, 2));
     return;
@@ -103,10 +121,18 @@ function printHelp(): void {
 
 Usage:
   preman init --api-key pm_live_...
-  preman register --file endpoints.json --upstream https://api.example.com
+  preman register --file endpoints.json --upstream https://api.example.com --intent "Auth endpoints"
   preman deploy --name "Auth MCP" --file endpoints.json --upstream https://api.example.com
-  preman token --mcp-id mcp_123 --scopes auth:login --ttl 900
+  preman token --mcp-id mcp_123 --consumer-label cursor-agent --scopes auth:login --rate-limit-rpm 60
   preman status
+
+Options:
+  --api-url                 Override API URL (default: https://flow.opentest.live)
+  --app-url                 Override app URL (default: https://www.flowtest.opentest.live)
+  --session-id              Reuse a Flow playground session id
+  --upstream-secret         Upstream API secret stored with a hosted MCP deploy
+  --consumer-label          Initial consumer token label (default: default-consumer)
+  --version                 Print CLI version
 
 The CLI is the on-ramp. Use the hosted workspace at https://www.flowtest.opentest.live
 to see customer tokens, revoke access, inspect audit logs, and review agent activity.

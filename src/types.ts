@@ -11,35 +11,49 @@ export type JsonSchema = Record<string, unknown>;
 
 export type EndpointDefinition = {
   method: HttpMethod;
-  path: string;
+  path?: string;
+  pathTemplate?: string;
+  path_template?: string;
   baseUrl?: string;
+  base_url?: string;
   description?: string;
   tags?: string[];
   scope?: string;
   requestBodySchema?: JsonSchema;
+  request_body_schema?: JsonSchema;
   responseSchema?: JsonSchema;
+  response_schema?: JsonSchema;
   headersSchema?: JsonSchema;
+  headers_schema?: JsonSchema;
   querySchema?: JsonSchema;
+  query_schema?: JsonSchema;
 };
 
 export type RegisterEndpointsRequest = {
+  sessionId?: string;
   projectId?: string;
   upstreamBaseUrl?: string;
   endpoints: EndpointDefinition[];
+  intent?: string;
 };
 
 export type RegisterEndpointsResponse = {
-  projectId: string;
+  sessionId: string;
   endpointCount: number;
   dashboardUrl: string;
+  endpointsUrl: string;
 };
 
 export type DeployMcpRequest = {
   name: string;
   upstreamBaseUrl: string;
-  endpointIds?: string[];
+  sessionId?: string;
   endpoints?: EndpointDefinition[];
   scopes?: string[];
+  initialUpstreamSecret?: string;
+  initialUpstreamSecretType?: "bearer" | "api_key" | "basic" | "custom";
+  upstreamAuthStyle?: Record<string, unknown>;
+  initialConsumerLabel?: string | null;
 };
 
 export type DeployMcpResponse = {
@@ -48,6 +62,9 @@ export type DeployMcpResponse = {
   hostedUrl: string;
   dashboardUrl: string;
   toolCount: number;
+  rawConsumerToken?: string | null;
+  consumerToken?: Record<string, unknown> | null;
+  installSnippet?: HostedMcpInstallSnippet | null;
 };
 
 export type CreateTokenRequest = {
@@ -55,19 +72,34 @@ export type CreateTokenRequest = {
   agentId?: string;
   customerId?: string;
   label?: string;
+  consumerLabel?: string;
   scopes: string[];
   ttlSeconds?: number;
   maxToolCalls?: number;
+  rateLimitRpm?: number;
+  upstreamCredentialId?: string | null;
 };
 
 export type CreateTokenResponse = {
   token: string;
   tokenId: string;
-  expiresAt: string;
-  installSnippet: {
-    mcpJson: Record<string, unknown>;
-    mcpJsonString: string;
-  };
+  expiresAt?: string | null;
+  metadata: Record<string, unknown>;
+  installSnippet: HostedMcpInstallSnippet;
+};
+
+export type HostedMcpInstallSnippet = {
+  url: string;
+  server_name?: string;
+  serverName?: string;
+  authorization_header?: string;
+  authorizationHeader?: string;
+  mcp_json: Record<string, unknown>;
+  mcpJson: Record<string, unknown>;
+  mcp_json_string?: string;
+  mcpJsonString?: string;
+  install_text?: string;
+  installText?: string;
 };
 
 export type AuditEvent = {
@@ -86,6 +118,7 @@ export type AuditLogResponse = {
 
 export type VerifyTokenRequest = {
   token: string;
+  mcpId?: string;
   requiredScope?: string;
 };
 
@@ -104,4 +137,3 @@ export type PremanClientOptions = {
   appUrl?: string;
   fetchImpl?: typeof fetch;
 };
-

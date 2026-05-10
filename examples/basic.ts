@@ -1,4 +1,4 @@
-import { PremanClient } from "@preman/sdk";
+import { PremanClient } from "preman-sdk";
 
 const preman = new PremanClient({
   apiKey: process.env.PREMAN_API_KEY,
@@ -33,4 +33,3 @@ const token = await preman.createToken({
 });
 
 console.log(token.installSnippet.mcpJsonString);
-
