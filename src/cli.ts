@@ -5,7 +5,7 @@ import { readConfig, writeConfig } from "./config.js";
 import type { EndpointDefinition } from "./types.js";
 
 type Command = "init" | "register" | "deploy" | "token" | "status" | "help";
-const VERSION = "0.1.3";
+const VERSION = "0.1.4";
 
 async function main(): Promise<void> {
   const [, , rawCommand = "help", ...args] = process.argv;
@@ -20,7 +20,7 @@ async function main(): Promise<void> {
   const command = rawCommand as Command;
 
   if (command === "init") {
-    const apiKey = valueFor(args, "--api-key") ?? process.env["PREMAN_API_KEY"];
+    const apiKey = valueFor(args, "--api-key") ?? process.env["PREMAN_API_KEY"] ?? process.env["OPENTEST_API_KEY"];
     const apiUrl = valueFor(args, "--api-url") ?? process.env["PREMAN_API_URL"];
     const appUrl = valueFor(args, "--app-url") ?? process.env["PREMAN_APP_URL"];
     const config = await writeConfig(omitUndefined({ apiKey, apiUrl, appUrl }));
@@ -30,7 +30,7 @@ async function main(): Promise<void> {
 
   const config = await readConfig();
   const client = new PremanClient(omitUndefined({
-    apiKey: process.env["PREMAN_API_KEY"] ?? config.apiKey,
+    apiKey: process.env["PREMAN_API_KEY"] ?? process.env["OPENTEST_API_KEY"] ?? config.apiKey,
     apiUrl: process.env["PREMAN_API_URL"] ?? config.apiUrl,
     appUrl: process.env["PREMAN_APP_URL"] ?? config.appUrl,
   }));
@@ -120,7 +120,7 @@ function printHelp(): void {
   console.log(`PreMan SDK CLI
 
 Usage:
-  npx preman-sdk init --api-key pm_live_...
+  npx preman-sdk init --api-key ot_live_...
   npx preman-sdk register --file endpoints.json --upstream https://api.example.com --intent "Auth endpoints"
   npx preman-sdk deploy --name "Auth MCP" --file endpoints.json --upstream https://api.example.com
   npx preman-sdk token --mcp-id mcp_123 --consumer-label cursor-agent --scopes auth:login --rate-limit-rpm 60
@@ -138,6 +138,11 @@ Options:
   --upstream-secret         Upstream API secret stored with a hosted MCP deploy
   --consumer-label          Initial consumer token label (default: default-consumer)
   --version                 Print CLI version
+
+Auth:
+  The CLI uses your OpenTest workspace API key, currently formatted as ot_live_...
+  Create one at https://www.flowtest.opentest.live/settings.
+  You can save it with init or set PREMAN_API_KEY / OPENTEST_API_KEY.
 
 Upstream:
   PreMan combines --upstream with each endpoint path.

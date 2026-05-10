@@ -13,7 +13,7 @@ function jsonResponse(body, init = {}) {
 test("registerEndpoints writes to a Flow agent session", async () => {
   const calls = [];
   const client = new PremanClient({
-    apiKey: "pm_live_test",
+    apiKey: "ot_live_12345678901234567890123456789012",
     apiUrl: "https://flow.opentest.live",
     appUrl: "https://www.flowtest.opentest.live",
     fetchImpl: async (url, init) => {
@@ -46,7 +46,7 @@ test("registerEndpoints writes to a Flow agent session", async () => {
 test("deployMcp uses the hosted MCP deploy route and normalizes response", async () => {
   const calls = [];
   const client = new PremanClient({
-    apiKey: "pm_live_test",
+    apiKey: "ot_live_12345678901234567890123456789012",
     fetchImpl: async (url, init) => {
       calls.push({ url: String(url), init });
       return jsonResponse({
@@ -80,7 +80,7 @@ test("deployMcp uses the hosted MCP deploy route and normalizes response", async
 test("createToken maps SDK token options to hosted MCP consumer tokens", async () => {
   const calls = [];
   const client = new PremanClient({
-    apiKey: "pm_live_test",
+    apiKey: "ot_live_12345678901234567890123456789012",
     fetchImpl: async (url, init) => {
       calls.push({ url: String(url), init });
       return jsonResponse({
@@ -113,7 +113,7 @@ test("createToken maps SDK token options to hosted MCP consumer tokens", async (
 
 test("verifyToken fails clearly until the hosted API exposes verification", async () => {
   const client = new PremanClient({
-    apiKey: "pm_live_test",
+    apiKey: "ot_live_12345678901234567890123456789012",
     fetchImpl: async () => {
       throw new Error("fetch should not be called");
     },
@@ -123,4 +123,21 @@ test("verifyToken fails clearly until the hosted API exposes verification", asyn
     () => client.verifyToken({ mcpId: "mcp_123", token: "ot_hmcp_test", requiredScope: "auth:login" }),
     (error) => error instanceof PremanConfigError && /not exposed/.test(error.message),
   );
+});
+
+test("client accepts OPENTEST_API_KEY as a compatibility fallback", async () => {
+  const previous = process.env.OPENTEST_API_KEY;
+  process.env.OPENTEST_API_KEY = "ot_live_12345678901234567890123456789012";
+  try {
+    const client = new PremanClient({
+      fetchImpl: async () => jsonResponse({ id: "session_123", endpoint_count: 0 }),
+    });
+    assert.equal(client.apiUrl, "https://flow.opentest.live");
+  } finally {
+    if (previous === undefined) {
+      delete process.env.OPENTEST_API_KEY;
+    } else {
+      process.env.OPENTEST_API_KEY = previous;
+    }
+  }
 });

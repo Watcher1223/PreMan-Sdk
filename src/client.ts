@@ -25,9 +25,16 @@ export class PremanClient {
   private readonly fetchImpl: typeof fetch;
 
   constructor(options: PremanClientOptions = {}) {
-    const apiKey = options.apiKey ?? process.env["PREMAN_API_KEY"] ?? "";
+    const apiKey = options.apiKey ?? process.env["PREMAN_API_KEY"] ?? process.env["OPENTEST_API_KEY"] ?? "";
     if (!apiKey.trim()) {
-      throw new PremanConfigError("Missing PREMAN_API_KEY. Pass apiKey or set PREMAN_API_KEY.");
+      throw new PremanConfigError(
+        "Missing API key. Create one at https://www.flowtest.opentest.live/settings, then run `preman init --api-key ot_live_...` or set PREMAN_API_KEY/OPENTEST_API_KEY.",
+      );
+    }
+    if (!apiKey.startsWith("ot_live_")) {
+      throw new PremanConfigError(
+        "Invalid API key format. The SDK currently uses OpenTest workspace API keys that start with `ot_live_`. Create one at https://www.flowtest.opentest.live/settings. Do not use a hosted MCP consumer token (`ot_hmcp_...`) or a login JWT.",
+      );
     }
 
     const fetchImpl = options.fetchImpl ?? globalThis.fetch;
@@ -170,7 +177,8 @@ export class PremanClient {
 
     const requestId = response.headers.get("x-request-id") ?? undefined;
     const body = await readBody(response);
-    const message = extractErrorMessage(body) ?? `PreMan API request failed with ${response.status}`;
+    const rawMessage = extractErrorMessage(body) ?? `PreMan API request failed with ${response.status}`;
+    const message = response.status === 401 || response.status === 403 ? enhanceAuthMessage(rawMessage) : rawMessage;
 
     if (response.status === 401 || response.status === 403) {
       if (message.toLowerCase().includes("policy")) {
@@ -218,6 +226,13 @@ function extractErrorMessage(body: unknown): string | undefined {
   if (typeof detail === "string") return detail;
   if (typeof error === "string") return error;
   return undefined;
+}
+
+function enhanceAuthMessage(message: string): string {
+  if (/invalid auth token|invalid or revoked api key|invalid api key/i.test(message)) {
+    return `${message}. Use an OpenTest workspace API key that starts with ot_live_. Create or copy one at https://www.flowtest.opentest.live/settings, then run \`preman init --api-key ot_live_...\`.`;
+  }
+  return message;
 }
 
 function toBackendEndpoint(endpoint: import("./types.js").EndpointDefinition): Record<string, unknown> {

@@ -26,7 +26,16 @@ npm install preman-sdk
 Or run the CLI directly:
 
 ```bash
-npx preman-sdk init --api-key pm_live_your_key
+npx preman-sdk init --api-key ot_live_your_key
+```
+
+The CLI uses your OpenTest workspace API key. Create or copy one from [OpenTest Settings](https://www.flowtest.opentest.live/settings). The key currently starts with `ot_live_`.
+
+You can also skip `init` and set an environment variable:
+
+```bash
+export PREMAN_API_KEY=ot_live_your_key
+# OPENTEST_API_KEY also works for compatibility with the OpenTest MCP.
 ```
 
 ## Quick Start
@@ -159,7 +168,7 @@ Calls outside the token's scope are denied by the hosted runtime and appear in t
 ## CLI Reference
 
 ```bash
-npx preman-sdk init --api-key pm_live_...
+npx preman-sdk init --api-key ot_live_...
 npx preman-sdk status
 npx preman-sdk register --file endpoints.json --upstream https://api.company.com
 npx preman-sdk deploy --name "Auth MCP" --file endpoints.json --upstream https://api.company.com
@@ -194,7 +203,7 @@ The CLI stores local config at:
 Environment variables override local config:
 
 ```bash
-PREMAN_API_KEY=pm_live_your_key
+PREMAN_API_KEY=ot_live_your_key
 PREMAN_API_URL=https://flow.opentest.live
 PREMAN_APP_URL=https://www.flowtest.opentest.live
 ```
