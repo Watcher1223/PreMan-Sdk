@@ -1,6 +1,6 @@
 # PreMan SDK
 
-[![GitHub stars](https://img.shields.io/github/stars/Watcher1223/PreMan-Sdk?style=social)](https://github.com/Watcher1223/PreMan-Sdk/stargazers)
+[![Star on GitHub](https://img.shields.io/badge/GitHub-Star%20the%20SDK-black?logo=github)](https://github.com/Watcher1223/PreMan-Sdk)
 [![Website](https://img.shields.io/badge/PreMan-preman.live-black)](https://preman.live)
 [![Hosted workspace](https://img.shields.io/badge/OpenTest-workspace-10b981)](https://www.flowtest.opentest.live)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
