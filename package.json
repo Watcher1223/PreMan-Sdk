@@ -1,0 +1,52 @@
+{
+  "name": "@preman/sdk",
+  "version": "0.1.0",
+  "description": "SDK and CLI for turning APIs into secure MCP servers with scoped tokens and audit logs.",
+  "type": "module",
+  "license": "MIT",
+  "homepage": "https://preman.live",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Watcher1223/PreMan-Sdk.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Watcher1223/PreMan-Sdk/issues"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "bin": {
+    "preman": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "mcp",
+    "agents",
+    "api",
+    "sdk",
+    "auth",
+    "audit",
+    "tokens",
+    "opentest",
+    "preman"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.0",
+    "@types/node": "^22.10.0"
+  }
+}

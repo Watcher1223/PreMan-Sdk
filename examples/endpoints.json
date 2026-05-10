@@ -1,0 +1,18 @@
+[
+  {
+    "method": "POST",
+    "path": "/auth/login",
+    "description": "Login with email and password.",
+    "tags": ["auth"],
+    "scope": "auth:login",
+    "requestBodySchema": {
+      "type": "object",
+      "properties": {
+        "email": { "type": "string", "format": "email" },
+        "password": { "type": "string" }
+      },
+      "required": ["email", "password"]
+    }
+  }
+]
+
