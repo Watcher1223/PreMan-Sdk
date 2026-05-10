@@ -55,13 +55,13 @@ Create `endpoints.json`:
 Register the endpoints into a Flow playground session:
 
 ```bash
-preman register --file endpoints.json --upstream https://api.company.com
+npx preman-sdk register --file endpoints.json --upstream https://api.company.com
 ```
 
 Deploy the same endpoints as a hosted MCP:
 
 ```bash
-preman deploy \
+npx preman-sdk deploy \
   --name "Company Auth MCP" \
   --file endpoints.json \
   --upstream https://api.company.com
@@ -70,7 +70,7 @@ preman deploy \
 Mint a scoped consumer token:
 
 ```bash
-preman token \
+npx preman-sdk token \
   --mcp-id 093c4ad4-477a-4e47-94b5-24ea8f1fe4f4 \
   --consumer-label "Acme support agent" \
   --scopes auth:login \
@@ -143,11 +143,11 @@ Calls outside the token's scope are denied by the hosted runtime and appear in t
 ## CLI Reference
 
 ```bash
-preman init --api-key pm_live_...
-preman status
-preman register --file endpoints.json --upstream https://api.company.com
-preman deploy --name "Auth MCP" --file endpoints.json --upstream https://api.company.com
-preman token --mcp-id mcp_123 --consumer-label cursor-agent --scopes auth:login --rate-limit-rpm 60
+npx preman-sdk init --api-key pm_live_...
+npx preman-sdk status
+npx preman-sdk register --file endpoints.json --upstream https://api.company.com
+npx preman-sdk deploy --name "Auth MCP" --file endpoints.json --upstream https://api.company.com
+npx preman-sdk token --mcp-id mcp_123 --consumer-label cursor-agent --scopes auth:login --rate-limit-rpm 60
 ```
 
 ## Configuration

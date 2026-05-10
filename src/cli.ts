@@ -5,7 +5,7 @@ import { readConfig, writeConfig } from "./config.js";
 import type { EndpointDefinition } from "./types.js";
 
 type Command = "init" | "register" | "deploy" | "token" | "status" | "help";
-const VERSION = "0.1.1";
+const VERSION = "0.1.2";
 
 async function main(): Promise<void> {
   const [, , rawCommand = "help", ...args] = process.argv;
@@ -120,10 +120,14 @@ function printHelp(): void {
   console.log(`PreMan SDK CLI
 
 Usage:
-  preman init --api-key pm_live_...
-  preman register --file endpoints.json --upstream https://api.example.com --intent "Auth endpoints"
-  preman deploy --name "Auth MCP" --file endpoints.json --upstream https://api.example.com
-  preman token --mcp-id mcp_123 --consumer-label cursor-agent --scopes auth:login --rate-limit-rpm 60
+  npx preman-sdk init --api-key pm_live_...
+  npx preman-sdk register --file endpoints.json --upstream https://api.example.com --intent "Auth endpoints"
+  npx preman-sdk deploy --name "Auth MCP" --file endpoints.json --upstream https://api.example.com
+  npx preman-sdk token --mcp-id mcp_123 --consumer-label cursor-agent --scopes auth:login --rate-limit-rpm 60
+  npx preman-sdk status
+
+Global install:
+  npm install -g preman-sdk
   preman status
 
 Options:
