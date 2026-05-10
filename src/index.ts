@@ -8,6 +8,10 @@ export {
 export { readBearerToken, verifyBearerToken } from "./middleware.js";
 export { fromOpenApi, fromPostmanCollection } from "./importers.js";
 export { isLocalUpstreamUrl, localUpstreamMessage } from "./upstream.js";
+export { hostedMcpJson, installCommand, writeMcpInstall } from "./installers.js";
+export { parseManifest, previewManifest, readManifest } from "./manifest.js";
+export { resolveSecret, secretFromEnv } from "./secrets.js";
+export { generateEndpointTypes } from "./typegen.js";
 export type {
   AuditEvent,
   AuditLogResponse,
@@ -16,12 +20,28 @@ export type {
   DeployMcpRequest,
   DeployMcpResponse,
   EndpointDefinition,
+  ErrorHookEvent,
   HostedMcpInstallSnippet,
   HttpMethod,
   JsonSchema,
+  ListTokensRequest,
+  ListTokensResponse,
   PremanClientOptions,
+  PremanClientHooks,
   RegisterEndpointsRequest,
   RegisterEndpointsResponse,
+  RequestHookEvent,
+  RequestOptions,
+  ResponseHookEvent,
+  RetryOptions,
+  RevokeTokenRequest,
+  RevokeTokenResponse,
+  RotateTokenRequest,
+  RotateTokenResponse,
+  TokenMetadata,
   VerifyTokenRequest,
   VerifyTokenResponse,
 } from "./types.js";
+export type { McpInstallTarget, HostedMcpConfig, WriteInstallOptions } from "./installers.js";
+export type { ManifestPlan, PremanManifest, PremanPolicyRule } from "./manifest.js";
+export type { SecretProvider } from "./secrets.js";

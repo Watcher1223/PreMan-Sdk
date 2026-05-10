@@ -1,12 +1,17 @@
 #!/usr/bin/env node
-import { readFile } from "fs/promises";
+import { readFile, writeFile } from "fs/promises";
 import { PremanClient } from "./client.js";
 import { readConfig, writeConfig } from "./config.js";
+import { fromOpenApi, fromPostmanCollection } from "./importers.js";
+import { installCommand, writeMcpInstall, type McpInstallTarget } from "./installers.js";
+import { previewManifest, readManifest } from "./manifest.js";
+import { resolveSecret, secretFromEnv } from "./secrets.js";
+import { generateEndpointTypes } from "./typegen.js";
 import { isLocalUpstreamUrl, localUpstreamMessage } from "./upstream.js";
 import type { EndpointDefinition } from "./types.js";
 
-type Command = "init" | "register" | "deploy" | "token" | "status" | "help";
-const VERSION = "0.2.1";
+type Command = "init" | "register" | "deploy" | "token" | "tokens" | "status" | "import" | "apply" | "install-snippet" | "typegen" | "help";
+const VERSION = "0.3.0";
 
 async function main(): Promise<void> {
   const [, , rawCommand = "help", ...args] = process.argv;
@@ -46,9 +51,7 @@ async function main(): Promise<void> {
   }
 
   if (command === "register") {
-    const file = valueFor(args, "--file");
-    if (!file) throw new Error("register requires --file endpoints.json");
-    const endpoints = JSON.parse(await readFile(file, "utf8")) as EndpointDefinition[];
+    const endpoints = await endpointsFromRequiredFile(args, "register");
     const result = await client.registerEndpoints(omitUndefined({
       sessionId: valueFor(args, "--session-id"),
       projectId: valueFor(args, "--project-id"),
@@ -62,55 +65,213 @@ async function main(): Promise<void> {
 
   if (command === "deploy") {
     const name = valueFor(args, "--name") ?? "Generated MCP";
-    const upstreamBaseUrl = valueFor(args, "--upstream");
-    const file = valueFor(args, "--file");
-    if (!upstreamBaseUrl) throw new Error("deploy requires --upstream https://api.example.com");
+    const upstreamBaseUrl = requiredValue(args, "--upstream", "deploy requires --upstream https://api.example.com");
     if (isLocalUpstreamUrl(upstreamBaseUrl) && !hasFlag(args, "--allow-local")) {
       throw new Error(localUpstreamMessage(upstreamBaseUrl));
     }
-    if (!file) throw new Error("deploy requires --file endpoints.json");
-    const endpoints = JSON.parse(await readFile(file, "utf8")) as EndpointDefinition[];
+    const endpoints = await endpointsFromRequiredFile(args, "deploy");
     const result = await client.deployMcp(omitUndefined({
       name,
       upstreamBaseUrl,
       sessionId: valueFor(args, "--session-id"),
       endpoints,
-      initialUpstreamSecret: valueFor(args, "--upstream-secret"),
+      initialUpstreamSecret: await upstreamSecretFor(args),
       initialUpstreamSecretType: valueFor(args, "--upstream-secret-type") as "bearer" | "api_key" | "basic" | "custom" | undefined,
       initialConsumerLabel: valueFor(args, "--consumer-label") ?? "default-consumer",
+      request: { idempotencyKey: valueFor(args, "--idempotency-key") },
     }));
     console.log(JSON.stringify(result, null, 2));
     return;
   }
 
   if (command === "token") {
-    const mcpId = valueFor(args, "--mcp-id");
-    const scopes = valueFor(args, "--scopes")?.split(",").map((s) => s.trim()).filter(Boolean);
-    if (!mcpId) throw new Error("token requires --mcp-id mcp_...");
-    if (!scopes?.length) throw new Error("token requires --scopes read:users,write:orders");
-    const result = await client.createToken(omitUndefined({
-      mcpId,
-      scopes,
-      agentId: valueFor(args, "--agent-id"),
-      customerId: valueFor(args, "--customer-id"),
-      label: valueFor(args, "--label"),
-      consumerLabel: valueFor(args, "--consumer-label"),
-      ttlSeconds: numberFor(args, "--ttl"),
-      maxToolCalls: numberFor(args, "--max-calls"),
-      rateLimitRpm: numberFor(args, "--rate-limit-rpm"),
-      upstreamCredentialId: valueFor(args, "--upstream-credential-id"),
-    }));
-    console.log(JSON.stringify(result, null, 2));
+    await handleTokenCommand(args, client);
+    return;
+  }
+
+  if (command === "tokens") {
+    const mcpId = requiredValue(args, "--mcp-id", "tokens requires --mcp-id mcp_...");
+    console.log(JSON.stringify(await client.listTokens({ mcpId, includeRevoked: hasFlag(args, "--include-revoked") }), null, 2));
+    return;
+  }
+
+  if (command === "import") {
+    await handleImportCommand(args, client);
+    return;
+  }
+
+  if (command === "apply") {
+    await handleApplyCommand(args, client);
+    return;
+  }
+
+  if (command === "install-snippet") {
+    await handleInstallSnippetCommand(args);
+    return;
+  }
+
+  if (command === "typegen") {
+    const endpoints = await endpointsFromRequiredFile(args, "typegen");
+    const text = generateEndpointTypes(endpoints, { namespace: valueFor(args, "--namespace") });
+    const out = valueFor(args, "--out");
+    if (out) {
+      await writeFile(out, text);
+      console.log(`Wrote ${out}`);
+    } else {
+      console.log(text);
+    }
     return;
   }
 
   throw new Error(`Unknown command: ${command}`);
 }
 
+async function handleTokenCommand(args: string[], client: PremanClient): Promise<void> {
+  const action = args[0];
+  if (action === "list") {
+    const mcpId = requiredValue(args, "--mcp-id", "token list requires --mcp-id mcp_...");
+    console.log(JSON.stringify(await client.listTokens({ mcpId, includeRevoked: hasFlag(args, "--include-revoked") }), null, 2));
+    return;
+  }
+  if (action === "revoke") {
+    const mcpId = requiredValue(args, "--mcp-id", "token revoke requires --mcp-id mcp_...");
+    const tokenId = requiredValue(args, "--token-id", "token revoke requires --token-id token_...");
+    console.log(JSON.stringify(await client.revokeToken({ mcpId, tokenId }), null, 2));
+    return;
+  }
+  if (action === "rotate") {
+    const mcpId = requiredValue(args, "--mcp-id", "token rotate requires --mcp-id mcp_...");
+    const tokenId = requiredValue(args, "--token-id", "token rotate requires --token-id token_...");
+    const scopes = scopesFor(args, "token rotate");
+    console.log(JSON.stringify(await client.rotateToken(omitUndefined({
+      mcpId,
+      tokenId,
+      scopes,
+      consumerLabel: valueFor(args, "--consumer-label"),
+      rateLimitRpm: numberFor(args, "--rate-limit-rpm"),
+      request: { idempotencyKey: valueFor(args, "--idempotency-key") },
+    })), null, 2));
+    return;
+  }
+
+  const mcpId = requiredValue(args, "--mcp-id", "token requires --mcp-id mcp_...");
+  const scopes = scopesFor(args, "token");
+  const result = await client.createToken(omitUndefined({
+    mcpId,
+    scopes,
+    agentId: valueFor(args, "--agent-id"),
+    customerId: valueFor(args, "--customer-id"),
+    label: valueFor(args, "--label"),
+    consumerLabel: valueFor(args, "--consumer-label"),
+    ttlSeconds: numberFor(args, "--ttl"),
+    maxToolCalls: numberFor(args, "--max-calls"),
+    rateLimitRpm: numberFor(args, "--rate-limit-rpm"),
+    upstreamCredentialId: valueFor(args, "--upstream-credential-id"),
+    request: { idempotencyKey: valueFor(args, "--idempotency-key") },
+  }));
+  console.log(JSON.stringify(result, null, 2));
+}
+
+async function handleImportCommand(args: string[], client: PremanClient): Promise<void> {
+  const kind = args[0];
+  const file = requiredValue(args, "--file", "import requires --file spec.json");
+  const raw = await readFile(file, "utf8");
+  const endpoints = kind === "openapi"
+    ? fromOpenApi(raw)
+    : kind === "postman"
+      ? fromPostmanCollection(raw)
+      : undefined;
+  if (!endpoints) throw new Error("import requires subcommand: openapi or postman");
+
+  const out = valueFor(args, "--out");
+  const text = JSON.stringify(endpoints, null, 2);
+  if (out) await writeFile(out, `${text}\n`);
+
+  if (hasFlag(args, "--deploy")) {
+    const upstreamBaseUrl = requiredValue(args, "--upstream", "import --deploy requires --upstream https://api.example.com");
+    if (isLocalUpstreamUrl(upstreamBaseUrl) && !hasFlag(args, "--allow-local")) throw new Error(localUpstreamMessage(upstreamBaseUrl));
+    console.log(JSON.stringify(await client.deployMcp({
+      name: valueFor(args, "--name") ?? "Imported MCP",
+      upstreamBaseUrl,
+      endpoints,
+      request: { idempotencyKey: valueFor(args, "--idempotency-key") },
+    }), null, 2));
+    return;
+  }
+
+  if (hasFlag(args, "--register")) {
+    console.log(JSON.stringify(await client.registerEndpoints({
+      upstreamBaseUrl: valueFor(args, "--upstream"),
+      intent: valueFor(args, "--intent") ?? `Imported ${kind} endpoints`,
+      endpoints,
+    }), null, 2));
+    return;
+  }
+
+  console.log(text);
+}
+
+async function handleApplyCommand(args: string[], client: PremanClient): Promise<void> {
+  const file = requiredValue(args, "--file", "apply requires --file preman.config.json");
+  const manifest = await readManifest(file);
+  const plan = previewManifest(manifest);
+  if (hasFlag(args, "--dry-run")) {
+    console.log(JSON.stringify(plan, null, 2));
+    return;
+  }
+  if (!plan.valid) throw new Error(`Invalid manifest: ${plan.errors.join("; ")}`);
+  const session = await client.registerEndpoints({
+    upstreamBaseUrl: manifest.upstream,
+    intent: manifest.intent,
+    endpoints: manifest.endpoints,
+  });
+  const shouldDeploy = hasFlag(args, "--deploy") || Boolean(manifest.deploy);
+  if (!shouldDeploy) {
+    console.log(JSON.stringify({ plan, session }, null, 2));
+    return;
+  }
+  if (isLocalUpstreamUrl(manifest.upstream) && !hasFlag(args, "--allow-local")) throw new Error(localUpstreamMessage(manifest.upstream));
+  const deploy = await client.deployMcp({
+    sessionId: session.sessionId,
+    name: manifest.deploy?.name ?? manifest.name ?? "Manifest MCP",
+    upstreamBaseUrl: manifest.upstream,
+    endpoints: manifest.endpoints,
+    initialConsumerLabel: manifest.deploy?.initialConsumerLabel ?? "default-consumer",
+    request: { idempotencyKey: valueFor(args, "--idempotency-key") },
+  });
+  console.log(JSON.stringify({ plan, session, deploy }, null, 2));
+}
+
+async function handleInstallSnippetCommand(args: string[]): Promise<void> {
+  const target = (valueFor(args, "--target") ?? "cursor") as McpInstallTarget;
+  const serverName = valueFor(args, "--server-name") ?? valueFor(args, "--name") ?? "preman-hosted-mcp";
+  const url = requiredValue(args, "--url", "install-snippet requires --url https://flow.opentest.live/h/.../mcp");
+  const token = valueFor(args, "--token") ?? await resolveSecret(valueFor(args, "--token-env") ? secretFromEnv(valueFor(args, "--token-env") as string) : undefined);
+  if (!token) throw new Error("install-snippet requires --token ot_hmcp_... or --token-env TOKEN_VAR");
+  if (hasFlag(args, "--write")) {
+    console.log(JSON.stringify(await writeMcpInstall({
+      target,
+      serverName,
+      url,
+      token,
+      path: valueFor(args, "--path"),
+      dryRun: hasFlag(args, "--dry-run"),
+    }), null, 2));
+    return;
+  }
+  console.log(installCommand({ serverName, url, token }, target));
+}
+
 function valueFor(args: string[], flag: string): string | undefined {
   const index = args.indexOf(flag);
   if (index === -1) return undefined;
   return args[index + 1];
+}
+
+function requiredValue(args: string[], flag: string, message: string): string {
+  const value = valueFor(args, flag);
+  if (!value) throw new Error(message);
+  return value;
 }
 
 function hasFlag(args: string[], flag: string): boolean {
@@ -124,6 +285,25 @@ function numberFor(args: string[], flag: string): number | undefined {
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
+function scopesFor(args: string[], command: string): string[] {
+  const scopes = valueFor(args, "--scopes")?.split(",").map((s) => s.trim()).filter(Boolean);
+  if (!scopes?.length) throw new Error(`${command} requires --scopes read:users,write:orders`);
+  return scopes;
+}
+
+async function endpointsFromRequiredFile(args: string[], command: string): Promise<EndpointDefinition[]> {
+  const file = valueFor(args, "--file");
+  if (!file) throw new Error(`${command} requires --file endpoints.json`);
+  return JSON.parse(await readFile(file, "utf8")) as EndpointDefinition[];
+}
+
+async function upstreamSecretFor(args: string[]): Promise<string | undefined> {
+  const inline = valueFor(args, "--upstream-secret");
+  if (inline) return inline;
+  const envName = valueFor(args, "--upstream-secret-env");
+  return resolveSecret(envName ? secretFromEnv(envName) : undefined);
+}
+
 function printHelp(): void {
   console.log(`PreMan SDK CLI
 
@@ -132,6 +312,14 @@ Usage:
   npx preman-sdk register --file endpoints.json --upstream https://api.example.com --intent "Auth endpoints"
   npx preman-sdk deploy --name "Auth MCP" --file endpoints.json --upstream https://api.example.com
   npx preman-sdk token --mcp-id mcp_123 --consumer-label cursor-agent --scopes auth:login --rate-limit-rpm 60
+  npx preman-sdk token list --mcp-id mcp_123
+  npx preman-sdk token revoke --mcp-id mcp_123 --token-id token_123
+  npx preman-sdk token rotate --mcp-id mcp_123 --token-id token_123 --scopes auth:login
+  npx preman-sdk import openapi --file openapi.json --out endpoints.json
+  npx preman-sdk import postman --file collection.json --deploy --upstream https://api.example.com
+  npx preman-sdk apply --file preman.config.json --dry-run
+  npx preman-sdk typegen --file endpoints.json --out preman-endpoints.ts
+  npx preman-sdk install-snippet --target cursor --server-name auth-mcp --url https://flow.opentest.live/h/.../mcp --token-env PREMAN_CONSUMER_TOKEN --write
   npx preman-sdk status
 
 Global install:
@@ -145,7 +333,9 @@ Options:
   --allow-local             Allow localhost/private upstreams for local-only previews
   --session-id              Reuse a Flow playground session id
   --upstream-secret         Upstream API secret stored with a hosted MCP deploy
+  --upstream-secret-env     Read upstream API secret from an environment variable
   --consumer-label          Initial consumer token label (default: default-consumer)
+  --idempotency-key         Idempotency key for write operations
   --version                 Print CLI version
 
 Auth:

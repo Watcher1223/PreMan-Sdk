@@ -1,0 +1,46 @@
+name: "PreMan endpoint registration"
+description: "Register or deploy API endpoints into PreMan from CI."
+inputs:
+  api-key:
+    description: "OpenTest workspace API key. Use a GitHub secret, not a plain value."
+    required: true
+  endpoint-file:
+    description: "Path to endpoints.json."
+    required: true
+  upstream:
+    description: "Public API base URL for the endpoints."
+    required: true
+  deploy:
+    description: "Set to true to deploy a hosted MCP instead of only registering endpoints."
+    required: false
+    default: "false"
+  name:
+    description: "Hosted MCP name when deploy=true."
+    required: false
+    default: "CI MCP"
+  api-url:
+    description: "PreMan API URL."
+    required: false
+    default: "https://flow.opentest.live"
+  app-url:
+    description: "PreMan workspace URL."
+    required: false
+    default: "https://www.flowtest.opentest.live"
+runs:
+  using: "composite"
+  steps:
+    - name: Install PreMan SDK
+      shell: bash
+      run: npm install -g preman-sdk
+    - name: Register or deploy endpoints
+      shell: bash
+      env:
+        PREMAN_API_KEY: ${{ inputs.api-key }}
+        PREMAN_API_URL: ${{ inputs.api-url }}
+        PREMAN_APP_URL: ${{ inputs.app-url }}
+      run: |
+        if [ "${{ inputs.deploy }}" = "true" ]; then
+          preman deploy --name "${{ inputs.name }}" --file "${{ inputs.endpoint-file }}" --upstream "${{ inputs.upstream }}"
+        else
+          preman register --file "${{ inputs.endpoint-file }}" --upstream "${{ inputs.upstream }}" --intent "CI endpoint registration"
+        fi

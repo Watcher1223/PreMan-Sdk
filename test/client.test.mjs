@@ -249,3 +249,74 @@ test("client accepts OPENTEST_API_KEY as a compatibility fallback", async () => 
     }
   }
 });
+
+test("client retries idempotent POST requests and emits hooks", async () => {
+  const events = [];
+  let count = 0;
+  const client = new PremanClient({
+    apiKey: "ot_live_12345678901234567890123456789012",
+    retry: { retries: 1, initialDelayMs: 1, maxDelayMs: 1 },
+    hooks: {
+      onRequest: (event) => events.push(["request", event.attempt, event.idempotencyKey]),
+      onResponse: (event) => events.push(["response", event.status]),
+      onError: (event) => events.push(["error", event.status]),
+    },
+    fetchImpl: async () => {
+      count += 1;
+      if (count === 1) {
+        return new Response(JSON.stringify({ detail: "temporary" }), { status: 503 });
+      }
+      return jsonResponse({
+        raw_token: "ot_hmcp_test",
+        token: { id: "token_123" },
+        install_snippet: { url: "https://flow.opentest.live/h/mcp_123/mcp", mcp_json: {} },
+      });
+    },
+  });
+
+  const result = await client.createToken({
+    mcpId: "mcp_123",
+    consumerLabel: "agent",
+    scopes: ["auth:login"],
+    request: { idempotencyKey: "idem_123" },
+  });
+
+  assert.equal(result.tokenId, "token_123");
+  assert.equal(count, 2);
+  assert.deepEqual(events.map((event) => event[0]), ["request", "response", "error", "request", "response"]);
+});
+
+test("token list revoke and rotate use hosted MCP token lifecycle endpoints", async () => {
+  const calls = [];
+  const client = new PremanClient({
+    apiKey: "ot_live_12345678901234567890123456789012",
+    fetchImpl: async (url, init) => {
+      calls.push({ url: String(url), init });
+      if (String(url).endsWith("/tokens?include_revoked=true")) {
+        return jsonResponse({ tokens: [{ id: "token_old", consumer_label: "agent", scopes: ["auth:login"] }] });
+      }
+      if (init.method === "DELETE") {
+        return jsonResponse({ revoked: true, token_id: "token_old" });
+      }
+      return jsonResponse({
+        raw_token: "ot_hmcp_new",
+        token: { id: "token_new" },
+        install_snippet: { url: "https://flow.opentest.live/h/mcp_123/mcp", mcp_json: {} },
+      });
+    },
+  });
+
+  const listed = await client.listTokens({ mcpId: "mcp_123", includeRevoked: true });
+  const rotated = await client.rotateToken({
+    mcpId: "mcp_123",
+    tokenId: "token_old",
+    scopes: ["auth:login"],
+    consumerLabel: "agent",
+  });
+
+  assert.equal(listed.tokens[0].id, "token_old");
+  assert.equal(rotated.newToken.tokenId, "token_new");
+  assert.equal(rotated.revoked.tokenId, "token_old");
+  assert.equal(calls[0].url, "https://flow.opentest.live/hosted-mcps/mcp_123/tokens?include_revoked=true");
+  assert.equal(calls[2].init.method, "DELETE");
+});

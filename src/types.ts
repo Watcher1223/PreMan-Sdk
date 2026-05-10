@@ -35,6 +35,7 @@ export type RegisterEndpointsRequest = {
   upstreamBaseUrl?: string;
   endpoints: EndpointDefinition[];
   intent?: string;
+  request?: RequestOptions;
 };
 
 export type RegisterEndpointsResponse = {
@@ -54,6 +55,7 @@ export type DeployMcpRequest = {
   initialUpstreamSecretType?: "bearer" | "api_key" | "basic" | "custom";
   upstreamAuthStyle?: Record<string, unknown>;
   initialConsumerLabel?: string | null;
+  request?: RequestOptions;
 };
 
 export type DeployMcpResponse = {
@@ -78,6 +80,7 @@ export type CreateTokenRequest = {
   maxToolCalls?: number;
   rateLimitRpm?: number;
   upstreamCredentialId?: string | null;
+  request?: RequestOptions;
 };
 
 export type CreateTokenResponse = {
@@ -86,6 +89,44 @@ export type CreateTokenResponse = {
   expiresAt?: string | null;
   metadata: Record<string, unknown>;
   installSnippet: HostedMcpInstallSnippet;
+};
+
+export type TokenMetadata = {
+  id: string;
+  consumerLabel?: string;
+  scopes: string[];
+  expiresAt?: string | null;
+  revokedAt?: string | null;
+  createdAt?: string | null;
+  raw?: Record<string, unknown>;
+};
+
+export type ListTokensRequest = {
+  mcpId: string;
+  includeRevoked?: boolean;
+};
+
+export type ListTokensResponse = {
+  tokens: TokenMetadata[];
+};
+
+export type RevokeTokenRequest = {
+  mcpId: string;
+  tokenId: string;
+};
+
+export type RevokeTokenResponse = {
+  revoked: boolean;
+  tokenId: string;
+};
+
+export type RotateTokenRequest = CreateTokenRequest & {
+  tokenId: string;
+};
+
+export type RotateTokenResponse = {
+  newToken: CreateTokenResponse;
+  revoked: RevokeTokenResponse;
 };
 
 export type HostedMcpInstallSnippet = {
@@ -109,6 +150,7 @@ export type AuditEvent = {
   resource?: string;
   outcome?: "success" | "error" | "denied";
   metadata?: Record<string, unknown>;
+  request?: RequestOptions;
 };
 
 export type AuditLogResponse = {
@@ -120,6 +162,7 @@ export type VerifyTokenRequest = {
   token: string;
   mcpId: string;
   requiredScope?: string;
+  request?: RequestOptions;
 };
 
 export type VerifyTokenIdentity = {
@@ -143,4 +186,47 @@ export type PremanClientOptions = {
   apiUrl?: string;
   appUrl?: string;
   fetchImpl?: typeof fetch;
+  timeoutMs?: number;
+  retry?: RetryOptions;
+  hooks?: PremanClientHooks;
+};
+
+export type RetryOptions = {
+  retries?: number;
+  initialDelayMs?: number;
+  maxDelayMs?: number;
+  retryUnsafe?: boolean;
+};
+
+export type RequestOptions = {
+  timeoutMs?: number;
+  idempotencyKey?: string;
+  retry?: RetryOptions;
+  headers?: Record<string, string>;
+};
+
+export type RequestHookEvent = {
+  method: string;
+  url: string;
+  path: string;
+  requestId: string;
+  attempt: number;
+  idempotencyKey?: string;
+};
+
+export type ResponseHookEvent = RequestHookEvent & {
+  status: number;
+  durationMs: number;
+};
+
+export type ErrorHookEvent = RequestHookEvent & {
+  status?: number;
+  durationMs: number;
+  error: unknown;
+};
+
+export type PremanClientHooks = {
+  onRequest?: (event: RequestHookEvent) => void | Promise<void>;
+  onResponse?: (event: ResponseHookEvent) => void | Promise<void>;
+  onError?: (event: ErrorHookEvent) => void | Promise<void>;
 };

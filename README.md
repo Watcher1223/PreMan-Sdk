@@ -165,7 +165,148 @@ A token can include:
 - optional rate limits
 - an upstream credential binding
 
-Calls outside the token's scope are denied by the hosted runtime and appear in the hosted workspace audit trail. Tokens can be revoked from the hosted workspace.
+Calls outside the token's scope are denied by the hosted runtime and appear in the hosted workspace audit trail. Tokens can be listed, rotated, and revoked from the SDK, CLI, or hosted workspace.
+
+```bash
+preman token list --mcp-id mcp_123
+preman token revoke --mcp-id mcp_123 --token-id token_123
+preman token rotate --mcp-id mcp_123 --token-id token_123 --scopes auth:login --consumer-label cursor-agent
+```
+
+## Import Existing API Docs
+
+Generate endpoint manifests from OpenAPI or Postman, then register or deploy them.
+
+```bash
+preman import openapi --file openapi.json --out endpoints.json
+preman import postman --file collection.json --register --upstream https://api.company.com
+preman import openapi --file openapi.json --deploy --name "Public API MCP" --upstream https://api.company.com
+```
+
+## Policy Manifests
+
+For CI and repeatable deploys, put the upstream, endpoints, and scopes in a manifest:
+
+```json
+{
+  "name": "Auth MCP",
+  "upstream": "https://api.company.com",
+  "intent": "Auth endpoints",
+  "endpoints": [
+    { "method": "POST", "path": "/auth/login", "scope": "auth:login" }
+  ],
+  "policies": [
+    { "scope": "auth:login", "rateLimitRpm": 60, "ttlSeconds": 900 }
+  ],
+  "deploy": {
+    "name": "Auth MCP",
+    "initialConsumerLabel": "default-consumer"
+  }
+}
+```
+
+Preview before writing anything:
+
+```bash
+preman apply --file preman.config.json --dry-run
+preman apply --file preman.config.json --deploy
+```
+
+## Generated Types
+
+Create TypeScript request/response types from your endpoint manifest:
+
+```bash
+preman typegen --file endpoints.json --out preman-endpoints.ts
+```
+
+## Install Snippets
+
+After minting a hosted MCP consumer token, generate or write client config:
+
+```bash
+preman install-snippet \
+  --target cursor \
+  --server-name auth-mcp \
+  --url https://flow.opentest.live/h/mcp_123/mcp \
+  --token-env PREMAN_CONSUMER_TOKEN
+
+preman install-snippet \
+  --target cursor \
+  --server-name auth-mcp \
+  --url https://flow.opentest.live/h/mcp_123/mcp \
+  --token-env PREMAN_CONSUMER_TOKEN \
+  --write
+```
+
+The SDK also exports `hostedMcpJson()`, `installCommand()`, and `writeMcpInstall()` for product flows that need to generate Cursor, Claude, or VS Code instructions.
+
+## Reliability And Observability
+
+`PremanClient` supports request timeouts, retries, idempotency keys, and hooks for logging.
+
+```ts
+const preman = new PremanClient({
+  apiKey: process.env.PREMAN_API_KEY,
+  timeoutMs: 15_000,
+  retry: { retries: 2, initialDelayMs: 250 },
+  hooks: {
+    onRequest: (event) => console.log("preman request", event.requestId, event.path),
+    onResponse: (event) => console.log("preman response", event.status, event.durationMs),
+    onError: (event) => console.error("preman error", event.status, event.error),
+  },
+});
+
+await preman.deployMcp({
+  name: "Auth MCP",
+  upstreamBaseUrl: "https://api.company.com",
+  endpoints,
+  request: { idempotencyKey: crypto.randomUUID() },
+});
+```
+
+For write operations that may be retried, pass an idempotency key. The client includes `X-Request-Id` on every request so API logs, CI logs, and hosted audit events can be correlated.
+
+## Secret Handling
+
+Avoid putting upstream or consumer secrets in shell history. Use environment-backed secret providers:
+
+```bash
+export API_BEARER_TOKEN=prod_token
+preman deploy \
+  --name "Auth MCP" \
+  --file endpoints.json \
+  --upstream https://api.company.com \
+  --upstream-secret-env API_BEARER_TOKEN \
+  --upstream-secret-type bearer
+```
+
+Programmatic helpers:
+
+```ts
+import { resolveSecret, secretFromEnv } from "preman-sdk";
+
+const upstreamSecret = await resolveSecret(secretFromEnv("API_BEARER_TOKEN"));
+```
+
+## GitHub Action
+
+Use the bundled action to register endpoints from CI:
+
+```yaml
+name: Register endpoints
+on: [push]
+jobs:
+  preman:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Watcher1223/PreMan-Sdk@main
+        with:
+          api-key: ${{ secrets.PREMAN_API_KEY }}
+          endpoint-file: endpoints.json
+          upstream: https://api.company.com
+```
 
 ## CLI Reference
 
@@ -175,6 +316,11 @@ npx preman-sdk status
 npx preman-sdk register --file endpoints.json --upstream https://api.company.com
 npx preman-sdk deploy --name "Auth MCP" --file endpoints.json --upstream https://api.company.com
 npx preman-sdk token --mcp-id mcp_123 --consumer-label cursor-agent --scopes auth:login --rate-limit-rpm 60
+npx preman-sdk token list --mcp-id mcp_123
+npx preman-sdk token revoke --mcp-id mcp_123 --token-id token_123
+npx preman-sdk import openapi --file openapi.json --out endpoints.json
+npx preman-sdk apply --file preman.config.json --dry-run
+npx preman-sdk typegen --file endpoints.json --out preman-endpoints.ts
 ```
 
 ### What `--upstream` Means
@@ -217,17 +363,16 @@ Working today:
 - `registerEndpoints()` -> creates or updates a Flow playground session
 - `deployMcp()` -> creates a hosted MCP from endpoint definitions
 - `createToken()` -> mints a scoped hosted MCP consumer token
+- `listTokens()` / `revokeToken()` / `rotateToken()` -> manage hosted MCP token lifecycle
 - `verifyToken()` / `verifyBearerToken()` -> verifies hosted MCP consumer tokens and scopes
 - `audit()` -> writes custom non-MCP agent events into PreMan audit logs
 - `fromOpenApi()` / `fromPostmanCollection()` -> converts API docs into endpoint definitions
+- `previewManifest()` / `readManifest()` -> validate policy-as-code manifests and dry runs
+- `generateEndpointTypes()` -> generate TypeScript types from endpoint schemas
+- `hostedMcpJson()` / `writeMcpInstall()` -> generate or write MCP install snippets
+- `resolveSecret()` / `secretFromEnv()` -> keep secrets out of command text and config
 - framework examples for Express, Fastify, Next.js, and Hono in `examples/frameworks`
-- `preman` CLI -> setup, register, deploy, token minting, status
-
-Planned next:
-
-- retry/idempotency controls for write operations
-- richer CLI import commands for OpenAPI/Postman files
-- generated policy previews before token minting
+- `preman` CLI -> setup, register, import, apply, deploy, tokens, typegen, install snippets, status
 
 Hosted MCP calls are already authenticated, scoped, and audited by PreMan.
 

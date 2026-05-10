@@ -6,9 +6,18 @@ import {
   type DeployMcpRequest,
   type DeployMcpResponse,
   type HostedMcpInstallSnippet,
+  type ListTokensRequest,
+  type ListTokensResponse,
   type PremanClientOptions,
   type RegisterEndpointsRequest,
   type RegisterEndpointsResponse,
+  type RequestOptions,
+  type RetryOptions,
+  type RevokeTokenRequest,
+  type RevokeTokenResponse,
+  type RotateTokenRequest,
+  type RotateTokenResponse,
+  type TokenMetadata,
   type VerifyTokenRequest,
   type VerifyTokenResponse,
 } from "./types.js";
@@ -23,6 +32,9 @@ export class PremanClient {
   readonly appUrl: string;
   private readonly apiKey: string;
   private readonly fetchImpl: typeof fetch;
+  private readonly timeoutMs: number;
+  private readonly retry: Required<RetryOptions>;
+  private readonly hooks: PremanClientOptions["hooks"];
 
   constructor(options: PremanClientOptions = {}) {
     const apiKey = options.apiKey ?? process.env["PREMAN_API_KEY"] ?? process.env["OPENTEST_API_KEY"] ?? "";
@@ -46,6 +58,9 @@ export class PremanClient {
     this.apiUrl = stripTrailingSlash(options.apiUrl ?? process.env["PREMAN_API_URL"] ?? DEFAULT_API_URL);
     this.appUrl = stripTrailingSlash(options.appUrl ?? process.env["PREMAN_APP_URL"] ?? DEFAULT_APP_URL);
     this.fetchImpl = fetchImpl;
+    this.timeoutMs = options.timeoutMs ?? 30_000;
+    this.retry = normalizeRetry(options.retry);
+    this.hooks = options.hooks;
   }
 
   async registerEndpoints(request: RegisterEndpointsRequest): Promise<RegisterEndpointsResponse> {
@@ -58,6 +73,7 @@ export class PremanClient {
         upstream_base_url: request.upstreamBaseUrl,
         intent: request.intent,
       },
+      request: request.request,
     });
     const id = response.id || sessionId;
     const dashboardUrl = this.dashboardUrl(`/try?session=${encodeURIComponent(id)}`);
@@ -87,6 +103,7 @@ export class PremanClient {
         upstream_auth_style: request.upstreamAuthStyle,
         initial_consumer_label: request.initialConsumerLabel === undefined ? "default-consumer" : request.initialConsumerLabel,
       },
+      request: request.request,
     });
     const hosted = objectAt(response, "hosted_mcp");
     const mcpId = stringAt(hosted, "id");
@@ -113,8 +130,11 @@ export class PremanClient {
         consumer_label: request.consumerLabel ?? request.label ?? request.agentId ?? request.customerId ?? "sdk-consumer",
         upstream_credential_id: request.upstreamCredentialId,
         scopes: request.scopes,
+        ttl_seconds: request.ttlSeconds,
+        max_tool_calls: request.maxToolCalls,
         rate_limit_rpm: request.rateLimitRpm,
       },
+      request: request.request,
     });
     const metadata = objectAt(response, "token");
     const rawToken = stringAt(response, "raw_token");
@@ -138,6 +158,7 @@ export class PremanClient {
           token: request.token,
           required_scope: request.requiredScope,
         }),
+        request: request.request,
       },
     );
 
@@ -167,6 +188,47 @@ export class PremanClient {
     };
   }
 
+  async listTokens(request: ListTokensRequest): Promise<ListTokensResponse> {
+    requireString(request.mcpId, "mcpId");
+    const query = request.includeRevoked ? "?include_revoked=true" : "";
+    const response = await this.request<Record<string, unknown>>(
+      `/hosted-mcps/${encodeURIComponent(request.mcpId)}/tokens${query}`,
+      { method: "GET" },
+    );
+    const tokensValue = response["tokens"];
+    const tokens = Array.isArray(tokensValue) ? tokensValue.map(normalizeTokenMetadata).filter(Boolean) as TokenMetadata[] : [];
+    return { tokens };
+  }
+
+  async revokeToken(request: RevokeTokenRequest): Promise<RevokeTokenResponse> {
+    requireString(request.mcpId, "mcpId");
+    requireString(request.tokenId, "tokenId");
+    const response = await this.request<Record<string, unknown>>(
+      `/hosted-mcps/${encodeURIComponent(request.mcpId)}/tokens/${encodeURIComponent(request.tokenId)}`,
+      { method: "DELETE" },
+    );
+    return {
+      revoked: typeof response["revoked"] === "boolean" ? response["revoked"] : true,
+      tokenId: stringAt(response, "token_id") || stringAt(response, "tokenId") || request.tokenId,
+    };
+  }
+
+  async rotateToken(request: RotateTokenRequest): Promise<RotateTokenResponse> {
+    requireString(request.tokenId, "tokenId");
+    const newToken = await this.createToken({
+      ...request,
+      request: {
+        ...request.request,
+        idempotencyKey: request.request?.idempotencyKey ?? randomUUID(),
+      },
+    });
+    const revoked = await this.revokeToken({
+      mcpId: request.mcpId,
+      tokenId: request.tokenId,
+    });
+    return { newToken, revoked };
+  }
+
   async audit(event: AuditEvent): Promise<AuditLogResponse> {
     requireString(event.action, "action");
     const response = await this.request<Record<string, unknown>>("/audit/events", {
@@ -179,6 +241,7 @@ export class PremanClient {
         outcome: event.outcome,
         metadata: event.metadata,
       }),
+      request: event.request,
     });
     return {
       id: stringAt(response, "id"),
@@ -196,42 +259,118 @@ export class PremanClient {
     options: {
       method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
       body?: unknown;
+      request?: RequestOptions;
     },
   ): Promise<T> {
-    const init: RequestInit = {
-      method: options.method,
-      headers: {
-        "Authorization": `Bearer ${this.apiKey}`,
-        "Content-Type": "application/json",
-        "User-Agent": "preman-sdk",
-      },
-    };
-    if (options.body !== undefined) {
-      init.body = JSON.stringify(options.body);
-    }
+    const requestId = randomUUID();
+    const retry = normalizeRetry({ ...this.retry, ...options.request?.retry });
+    const timeoutMs = options.request?.timeoutMs ?? this.timeoutMs;
+    const idempotencyKey = options.request?.idempotencyKey;
+    const maxAttempts = retry.retries + 1;
+    const canRetryUnsafe = retry.retryUnsafe || Boolean(idempotencyKey);
+    const url = `${this.apiUrl}${path}`;
 
-    const response = await this.fetchImpl(`${this.apiUrl}${path}`, init);
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      const startedAt = Date.now();
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), timeoutMs);
+      const hookEvent = { method: options.method, url, path, requestId, attempt, idempotencyKey };
 
-    if (response.ok) {
-      const text = await response.text();
-      if (!text) return {} as T;
-      return JSON.parse(text) as T;
-    }
-
-    const requestId = response.headers.get("x-request-id") ?? undefined;
-    const body = await readBody(response);
-    const rawMessage = extractErrorMessage(body) ?? `PreMan API request failed with ${response.status}`;
-    const message = response.status === 401 || response.status === 403 ? enhanceAuthMessage(rawMessage) : rawMessage;
-
-    if (response.status === 401 || response.status === 403) {
-      if (message.toLowerCase().includes("policy")) {
-        throw new PremanPolicyDeniedError(message, { status: response.status, requestId, body });
+      const init: RequestInit = {
+        method: options.method,
+        signal: controller.signal,
+        headers: {
+          "Authorization": `Bearer ${this.apiKey}`,
+          "Content-Type": "application/json",
+          "User-Agent": "preman-sdk",
+          "X-Request-Id": requestId,
+          ...options.request?.headers,
+          ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}),
+        },
+      };
+      if (options.body !== undefined) {
+        init.body = JSON.stringify(options.body);
       }
-      throw new PremanAuthError(message, { status: response.status, requestId, body });
-    }
 
-    throw new PremanError(message, { status: response.status, requestId, body });
+      try {
+        await this.hooks?.onRequest?.(hookEvent);
+        const response = await this.fetchImpl(url, init);
+        clearTimeout(timeout);
+        const durationMs = Date.now() - startedAt;
+        await this.hooks?.onResponse?.({ ...hookEvent, status: response.status, durationMs });
+
+        if (response.ok) {
+          const text = await response.text();
+          if (!text) return {} as T;
+          return JSON.parse(text) as T;
+        }
+
+        const body = await readBody(response);
+        const error = errorFromResponse(response, body);
+        if (shouldRetryResponse(response.status, options.method, canRetryUnsafe) && attempt < maxAttempts) {
+          await this.hooks?.onError?.({ ...hookEvent, status: response.status, durationMs, error });
+          await sleep(backoffMs(attempt, retry));
+          continue;
+        }
+
+        throw error;
+      } catch (error) {
+        clearTimeout(timeout);
+        const durationMs = Date.now() - startedAt;
+        await this.hooks?.onError?.({ ...hookEvent, status: error instanceof PremanError ? error.status : undefined, durationMs, error });
+        if (attempt < maxAttempts && shouldRetryError(error, options.method, canRetryUnsafe)) {
+          await sleep(backoffMs(attempt, retry));
+          continue;
+        }
+        throw error;
+      }
+    }
+    throw new PremanError("PreMan API request failed after retry attempts.");
   }
+}
+
+function normalizeRetry(retry: RetryOptions | undefined = {}): Required<RetryOptions> {
+  return {
+    retries: retry.retries ?? 2,
+    initialDelayMs: retry.initialDelayMs ?? 250,
+    maxDelayMs: retry.maxDelayMs ?? 2_000,
+    retryUnsafe: retry.retryUnsafe ?? false,
+  };
+}
+
+function shouldRetryResponse(status: number, method: string, canRetryUnsafe: boolean): boolean {
+  if (![408, 429, 500, 502, 503, 504].includes(status)) return false;
+  return method === "GET" || method === "DELETE" || canRetryUnsafe;
+}
+
+function shouldRetryError(error: unknown, method: string, canRetryUnsafe: boolean): boolean {
+  if (error instanceof PremanAuthError || error instanceof PremanPolicyDeniedError) return false;
+  if (error instanceof PremanError && error.status && !shouldRetryResponse(error.status, method, canRetryUnsafe)) return false;
+  return method === "GET" || method === "DELETE" || canRetryUnsafe;
+}
+
+function backoffMs(attempt: number, retry: Required<RetryOptions>): number {
+  const raw = retry.initialDelayMs * 2 ** Math.max(0, attempt - 1);
+  return Math.min(raw, retry.maxDelayMs);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function errorFromResponse(response: Response, body: unknown): PremanError {
+  const requestId = response.headers.get("x-request-id") ?? undefined;
+  const rawMessage = extractErrorMessage(body) ?? `PreMan API request failed with ${response.status}`;
+  const message = response.status === 401 || response.status === 403 ? enhanceAuthMessage(rawMessage) : rawMessage;
+
+  if (response.status === 401 || response.status === 403) {
+    if (message.toLowerCase().includes("policy")) {
+      return new PremanPolicyDeniedError(message, { status: response.status, requestId, body });
+    }
+    return new PremanAuthError(message, { status: response.status, requestId, body });
+  }
+
+  return new PremanError(message, { status: response.status, requestId, body });
 }
 
 function stripTrailingSlash(value: string): string {
@@ -344,6 +483,22 @@ function normalizeInstallSnippet(value: Record<string, unknown>): HostedMcpInsta
     mcpJsonString: stringAt(value, "mcp_json_string") || undefined,
     installText: stringAt(value, "install_text") || undefined,
   } as HostedMcpInstallSnippet;
+}
+
+function normalizeTokenMetadata(value: unknown): TokenMetadata | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  const id = stringAt(record, "id") || stringAt(record, "token_id") || stringAt(record, "tokenId");
+  if (!id) return undefined;
+  return {
+    id,
+    consumerLabel: stringAt(record, "consumer_label") || stringAt(record, "consumerLabel") || undefined,
+    scopes: stringArrayAt(record, "scopes"),
+    expiresAt: nullableStringAt(record, "expires_at") ?? nullableStringAt(record, "expiresAt"),
+    revokedAt: nullableStringAt(record, "revoked_at") ?? nullableStringAt(record, "revokedAt"),
+    createdAt: nullableStringAt(record, "created_at") ?? nullableStringAt(record, "createdAt"),
+    raw: record,
+  };
 }
 
 function omitUndefined<T extends Record<string, unknown>>(value: T): T {

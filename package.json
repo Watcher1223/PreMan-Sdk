@@ -1,7 +1,7 @@
 {
   "name": "preman-sdk",
-  "version": "0.2.1",
-  "description": "SDK and CLI for turning APIs into hosted MCP servers with scoped consumer tokens.",
+  "version": "0.3.0",
+  "description": "Production TypeScript SDK and CLI for turning APIs into hosted MCP servers with scoped agent tokens, audit logs, and policy controls.",
   "type": "module",
   "license": "MIT",
   "homepage": "https://preman.live",
@@ -20,6 +20,22 @@
     "./importers": {
       "types": "./dist/importers.d.ts",
       "import": "./dist/importers.js"
+    },
+    "./installers": {
+      "types": "./dist/installers.d.ts",
+      "import": "./dist/installers.js"
+    },
+    "./manifest": {
+      "types": "./dist/manifest.d.ts",
+      "import": "./dist/manifest.js"
+    },
+    "./secrets": {
+      "types": "./dist/secrets.d.ts",
+      "import": "./dist/secrets.js"
+    },
+    "./typegen": {
+      "types": "./dist/typegen.d.ts",
+      "import": "./dist/typegen.js"
     }
   },
   "main": "./dist/index.js",
@@ -31,6 +47,7 @@
   "files": [
     "dist",
     "examples",
+    "action.yml",
     "README.md",
     "LICENSE"
   ],
